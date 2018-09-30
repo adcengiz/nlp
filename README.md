@@ -1,2 +1,2 @@
 # nlp
-Natural Language Processing Class Repo
+NYU Natural Language Processing Class Repo
