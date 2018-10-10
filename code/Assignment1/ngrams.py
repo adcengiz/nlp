@@ -7,13 +7,18 @@ import os
 import itertools
 import torch
 import numpy as np
+from torch.autograd import Variable
 from torch.utils.data import Dataset
 import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
+from torch.utils.data import Dataset
 from collections import Counter
 
+print ("Imports done!")
+
 max_vocab_size = 10000
+print ("Max vocab size = " + str(max_vocab_size))
 # save index 0 for unk and 1 for pad
 PAD_IDX = 0
 UNK_IDX = 1
@@ -22,32 +27,29 @@ def build_vocab(all_tokens,size=max_vocab_size):
     # Returns:
     # id2token: list of tokens, where id2token[i] returns token that corresponds to token i
     # token2id: dictionary where keys represent tokens and corresponding values represent indices
-    token_counter = Counter(all_tokens)
+    token_counter = Counter(np.array(all_tokens))
     vocab, count = zip(*token_counter.most_common(size))
-    id2token = list(vocab)
+    id2token = [*vocab]
     token2id = dict(zip(vocab, range(2,2+len(vocab)))) 
     id2token = ['<pad>', '<unk>'] + id2token
     token2id['<pad>'] = PAD_IDX 
     token2id['<unk>'] = UNK_IDX
     return token2id, id2token
 
+#token2id, id2token = build_vocab(all_train_tokens,size=max_vocab_size)
 ## convert token to id in the dataset
 ## copied from lab3 notebook
-def token2index_dataset(tokens_data):
+def token2index_dataset(tokens_data,idx=None):
     indices_data = []
     for tokens in tokens_data:
-        index_list = [token2id[token] if token in \
-                      token2id else UNK_IDX for token in tokens]
+        index_list = [idx[token] if token in \
+                      idx else UNK_IDX for token in tokens]
         indices_data.append(index_list)
     return indices_data
 
 
 ## Pytorch Data Loader
 MAX_SENTENCE_LENGTH = 200
-
-import numpy as np
-import torch
-from torch.utils.data import Dataset
 
 class NewsGroupDataset(Dataset):
     """
@@ -100,11 +102,6 @@ def imdb_func(batch):
 
 
 ## BAG OF NGRAMS MODEL
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 class BagOfNgrams(nn.Module):
     """
     BagOfNgrams classification model
@@ -118,7 +115,7 @@ class BagOfNgrams(nn.Module):
         # pay attention to padding_idx 
         self.embed = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.linear = nn.Linear(emb_dim,20)
-    
+        print ("self_embed = "+str(self.embed))
     def forward(self, data, length):
         """
         
@@ -128,11 +125,14 @@ class BagOfNgrams(nn.Module):
             length of each sentences in the data.
         """
         out = self.embed(data)
+#        print ("out - embed = "+str(out))
         out = torch.sum(out, dim=1)
-        out /= length.view(length.size()[0],1).expand_as(out).float()
+#        print ("out = sum = "+str(out))
+        ## making this Variable, if this doesn't work make the upper out float tensor
+        out /= length.view(length.size()[0],1).expand_as(out)
      
         # return logits
-        out = self.linear(out.float())
+        out = self.linear(out)
         return out
 
 def test_model(loader, model):
@@ -152,12 +152,45 @@ def test_model(loader, model):
         correct += predicted.eq(labels.view_as(predicted)).sum().item()
     return (100 * correct / total)
 
-## READ NGRAM DATASETS (PREPARED EARLIER IN Assignment 1.ipynb)
-NGRAM_DATASETS = pd.DataFrame(pd.read_csv("ngram_df.csv",header=None))
+print ("Reading NGRAM_DATASETS")
 
+train_size = 20000
+val_size = 5000
+def read_ngram_dataset(path=None):
+    ## clean the strings - train
+    datagrams_train = pd.DataFrame(pd.read_csv(path,header=None))[1][0]\
+    .replace("/","").replace("[","").split("]")
+    
+    datagrams_train = [x.replace("'","").split(", ") for x in datagrams_train][:train_size]
+    datagrams_train = [x if x not in [""," "] else None for x in datagrams_train]
+    ## clean the strings - all
+    datagrams_all = pd.DataFrame(pd.read_csv(path,header=None))[1][1]\
+    .replace("/","").replace("[","").split("]")
+    
+    datagrams_all = [x if x not in [""," "] else None for x in datagrams_all]
+    ## clean the strings - val
+    datagrams_val = pd.DataFrame(pd.read_csv(path,header=None))[1][2]\
+    .replace("/","").replace("[","").split("]")
+    datagrams_val = [x.replace("'","").replace("'","").split(", ") for x in datagrams_val][:val_size]
+    datagrams_val = [x if x not in [""," "] else None for x in datagrams_val]
+    
+    return [datagrams_train,datagrams_all,datagrams_val]
+
+unigrams_train, unigrams_all, unigrams_val = read_ngram_dataset("Unigrams.csv")
+bigrams_train, bigrams_all, bigrams_val = read_ngram_dataset("bigrams.csv")
+trigrams_train, trigrams_all, trigrams_val = read_ngram_dataset("trigrams.csv")
+
+NGRAM_DATASETS = {1:[unigrams_train,unigrams_all,unigrams_val],
+                  2:[bigrams_train,bigrams_all,bigrams_val],
+                  3:[trigrams_train,trigrams_all,trigrams_val]}
+
+print ("NGRAM_DATASETS READING DONE")
 ## HYPERPARAMETER SEARCH ON VALIDATION SET
+train_data_labels = list(pd.DataFrame(pd.read_csv("train_data_labels.csv"))["0"])
+val_data_labels = list(pd.DataFrame(pd.read_csv("val_data_labels.csv"))["0"])
 
-def hyperparameter_search(hyperparameter_space=params):
+
+def hyperparameter_search(hyperparameter_space=None):
     """Takes as input a list of parameter search space lists."""
     ## CRITERION: ONLY CROSS ENTROPY LOSS FOR NOW
     param_space = list(itertools.product(*params))
@@ -166,7 +199,7 @@ def hyperparameter_search(hyperparameter_space=params):
     param_losses = {}
     
     for i in param_space:
-        print (i)
+#        print (i)
         
         ## will append validation losses here
         param_losses[i] = []
@@ -179,21 +212,30 @@ def hyperparameter_search(hyperparameter_space=params):
         embed_dimension = i[3] ## embedding size
         max_sentence_length = i[4] ## max sentence length of data loader
         batch_size = i[5]
-
-        
+  
         criterion = torch.nn.CrossEntropyLoss()
 
         ## tokenize training and validation data
-        train_data_tokens = NGRAM_DATASETS[grams][0]
-        all_train_tokens = NGRAM_DATASETS[grams][1]
-        val_data_tokens = NGRAM_DATASETS[grams][2]
-
+        if grams == 1:
+            train_data_tokens = unigrams_train
+            all_train_tokens = unigrams_all
+            val_data_tokens = unigrams_val
+        elif grams == 2:
+            train_data_tokens = bigrams_train
+            all_train_tokens = bigrams_all
+            val_data_tokens = bigrams_val
+        else:
+            train_data_tokens = trigrams_train
+            all_train_tokens = trigrams_all
+            val_data_tokens = trigrams_val
+	
+        print ("Train data tokens is " + str(type(train_data_tokens)))
         ## build vocab for the specified vocab size
         token2id, id2token = build_vocab(all_train_tokens,
                                         size=vocab_size)
-
-        train_data_indices = token2index_dataset(train_data_tokens)
-        val_data_indices = token2index_dataset(val_data_tokens)
+        id2token = id2token[:vocab_size]
+        train_data_indices = token2index_dataset(train_data_tokens,idx=token2id)
+        val_data_indices = token2index_dataset(val_data_tokens,idx=token2id)
 
         ## assign max sentence length and batch size from 
         ## parameter space
@@ -213,23 +255,27 @@ def hyperparameter_search(hyperparameter_space=params):
                                                    collate_fn=imdb_func,
                                                    shuffle=True)
 
-        print ("Datasets ready.")
+#        print ("Datasets ready.")
         ## assign embedding dimension
         ## from parameter space
         embed_dim = embed_dimension    
 
         ## model
-        model = BagOfNgrams(len(id2token), emb_dim)
+        print ("len-id2token = " + str(len(id2token)))
+        model = BagOfNgrams(len(id2token), embed_dimension)
+        print ("model = "+ str(model))
         optimizers = [torch.optim.Adam(model.parameters(), lr=step),
                       torch.optim.SGD(model.parameters(), lr=step)]
         
         for optimizer in optimizers:
-            print ("Optimizer type: "+str(optimizer))
+#            print ("Optimizer type: "+str(optimizer))
             for epoch in range(NUM_EPOCHS):
                 for x, (data, lengths, labels) in enumerate(train_loader):
                     model.train()
                     data_batch, length_batch, label_batch = data, lengths, labels
                     optimizer.zero_grad()
+	            ## if this doesn't work, take the floats back
+                    print ("length batch is " + str(type(length_batch)))
                     outputs = model(data_batch, length_batch)
                     loss = criterion(outputs, label_batch)
                     loss.backward()
@@ -237,25 +283,28 @@ def hyperparameter_search(hyperparameter_space=params):
                     # validate every 100 iterations
                     if x > 0 and x % 100 == 0:
                         # validate
+                        print ("One run!")
                         val_acc = test_model(val_loader, model)
                         param_losses[i].append(val_acc)
-                        print('Epoch: [{}/{}], Step: [{}/{}], \
-                        Validation Acc: {}'.format(epoch+1, \
-                                                   num_epochs, \
-                                                   i+1, len(train_loader), val_acc))
+#                        print('Epoch: [{}/{}], Step: [{}/{}], \
+#                        Validation Acc: {}'.format(epoch+1, \
+#                                                   num_epochs, \
+#                                                   i+1, len(train_loader), val_acc))
                         
         print (param_losses[i])
     print ("Hyperparameter search done!")
     return param_losses
 
-params = [[1e-3,1e-2,1e-1,1,10], ## learning rates
-          list(range(1,5)), ## ngrams
-          [10000,25000,50000], ## vocab size
-          [50,100,150], ## embedding size
-          [50,200,300], ## max sentence length
-          [16,32,64] ## batch size
+params = [[1e-3,1e-2,1e-1,1,10, 100], ## learning rates
+          [*range(1,4)], ## ngrams
+          [5000,10000,20000], ## vocab size
+          [200,300,400], ## embedding size
+          [100,150], ## max sentence length
+          [16,32,64,128] ## batch size
          ]
 
 param_val_losses = hyperparameter_search(params)
 
-param_val_losses.to_csv("validation_losses.csv")
+pd.DataFrame(param_val_losses).to_csv("validation_losses.csv")
+
+print (param_val_losses)
