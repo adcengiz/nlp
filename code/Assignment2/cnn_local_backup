@@ -1,0 +1,6318 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "<h2 id=\"tocheading\">Table of Contents</h2>\n",
+    "<div id=\"toc\"></div>"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "application/javascript": [
+       "$.getScript('https://kmahelona.github.io/ipython_notebook_goodies/ipython_notebook_toc.js')"
+      ],
+      "text/plain": [
+       "<IPython.core.display.Javascript object>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "%%javascript\n",
+    "$.getScript('https://kmahelona.github.io/ipython_notebook_goodies/ipython_notebook_toc.js')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pickle\n",
+    "import random\n",
+    "import random\n",
+    "import spacy\n",
+    "import csv\n",
+    "import string\n",
+    "import os\n",
+    "import torch\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import spacy\n",
+    "from torch.utils.data import Dataset\n",
+    "import torch.nn as nn\n",
+    "import torch.nn.functional as F\n",
+    "import matplotlib.pyplot as plt\n",
+    "%matplotlib inline"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Part 1: Data Upload & Preprocessing\n",
+    "The datasets provided are already tokenized. Thus, without running the data through a tokenizer, we use pretrained word embeddings (e.g. fast-Text) to embed the tokens. "
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Word Vectors\n",
+    "\n",
+    "The web page for recommended word vector sets can be found here: https://fasttext.cc/docs/en/english-vectors.html wiki-news-300d-1M.vec from Mikolov et al (2018, Advances in Pre-Training Distributed Word Representations) 1 million word vectors trained on Wikipedia 2017, UMBC webbase corpus and statmt.org news dataset (16B tokens) is used in this assignment. "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import io\n",
+    "\n",
+    "def load_vectors(fname):\n",
+    "    fin = io.open(fname, 'r', encoding='utf-8', \n",
+    "                  newline='\\n', errors='ignore')\n",
+    "    n, d = map(int, fin.readline().split())\n",
+    "    data = {}\n",
+    "    for line in fin:\n",
+    "        tokens = line.rstrip().split(' ')\n",
+    "        ## convert all maps to lists\n",
+    "        data[tokens[0]] = [*map(float, tokens[1:])]\n",
+    "    return data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get the wiki word vectors\n",
+    "fname = \"wiki-news-300d-1M.vec\"\n",
+    "word_vectors = load_vectors(fname)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "all_vocab_tokens = [*word_vectors.keys()]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "The number of unique tokens in the wiki news English vectors is 999994\n"
+     ]
+    }
+   ],
+   "source": [
+    "print (\"The number of unique tokens in the wiki news English vectors is \" + str(len(all_vocab_tokens) ))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Construct Table from Vocab Dict"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "word_vector_df = pd.DataFrame(word_vectors)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "word_vector_df = word_vector_df.T"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "table_lookup = np.array(word_vector_df)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def index_vocab(table_df):\n",
+    "    \n",
+    "    token_array = np.array([*table_df.index])\n",
+    "    num_index_array = np.array([*range(table_df.shape[0])])\n",
+    "    \n",
+    "    token2id = {}\n",
+    "    id2token = {}\n",
+    "    for i in [*range(len(token_array))]:\n",
+    "        token2id[token_array[i]] = num_index_array[i]\n",
+    "        id2token[num_index_array[i]] = token_array[i]\n",
+    "\n",
+    "    return token2id, id2token"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "token2id_wiki, id2token_wiki = index_vocab(word_vector_df)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "__Check for table correctness!__\n",
+    "\n",
+    "Do token2id and id2token match each other?"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "13823"
+      ]
+     },
+     "execution_count": 12,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "token2id_wiki[\"Alberto\"]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "'IRAF'"
+      ]
+     },
+     "execution_count": 13,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "id2token_wiki[93141]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Does the table fit the initial word vector vocab?"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "False"
+      ]
+     },
+     "execution_count": 14,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "all(word_vectors[\"Alberto\"] == table_lookup[93141])==True"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Part 1.1: SNLI Dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "label_dict = {\"entailment\":0,\n",
+    "             \"neutral\":1,\n",
+    "             \"contradiction\":2}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "snli_train = pd.read_table(\"data/snli_train.tsv\")\n",
+    "snli_val = pd.read_table(\"data/snli_val.tsv\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get tokenized training data\n",
+    "snli_train[\"sentence1\"] = snli_train[\"sentence1\"].apply(lambda x: x.split(\" \"))\n",
+    "snli_train[\"sentence2\"] = snli_train[\"sentence2\"].apply(lambda x: x.split(\" \"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get labels\n",
+    "snli_train[\"label_num\"] = snli_train[\"label\"].apply(lambda x: label_dict[x])\n",
+    "snli_val[\"label_num\"] = snli_val[\"label\"].apply(lambda x: label_dict[x])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get tokenized validation data\n",
+    "snli_val[\"sentence1\"] = snli_val[\"sentence1\"].apply(lambda x: x.split(\" \"))\n",
+    "snli_val[\"sentence2\"] = snli_val[\"sentence2\"].apply(lambda x: x.split(\" \"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get label arrays\n",
+    "snli_train_labels = np.array(snli_train[\"label_num\"])\n",
+    "snli_val_labels = np.array(snli_val[\"label_num\"])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>sentence1</th>\n",
+       "      <th>sentence2</th>\n",
+       "      <th>label</th>\n",
+       "      <th>label_num</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>[Three, women, on, a, stage, ,, one, wearing, ...</td>\n",
+       "      <td>[There, are, two, women, standing, on, the, st...</td>\n",
+       "      <td>contradiction</td>\n",
+       "      <td>2</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>[Four, people, sit, on, a, subway, two, read, ...</td>\n",
+       "      <td>[Multiple, people, are, on, a, subway, togethe...</td>\n",
+       "      <td>entailment</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>[bicycles, stationed, while, a, group, of, peo...</td>\n",
+       "      <td>[People, get, together, near, a, stand, of, bi...</td>\n",
+       "      <td>entailment</td>\n",
+       "      <td>0</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "                                           sentence1  \\\n",
+       "0  [Three, women, on, a, stage, ,, one, wearing, ...   \n",
+       "1  [Four, people, sit, on, a, subway, two, read, ...   \n",
+       "2  [bicycles, stationed, while, a, group, of, peo...   \n",
+       "\n",
+       "                                           sentence2          label  label_num  \n",
+       "0  [There, are, two, women, standing, on, the, st...  contradiction          2  \n",
+       "1  [Multiple, people, are, on, a, subway, togethe...     entailment          0  \n",
+       "2  [People, get, together, near, a, stand, of, bi...     entailment          0  "
+      ]
+     },
+     "execution_count": 22,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "snli_val.head(3)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Part 1.2: MultiNLI Dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "mnli_train = pd.read_table(\"data/mnli_train.tsv\")\n",
+    "mnli_val = pd.read_table(\"data/mnli_val.tsv\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>sentence1</th>\n",
+       "      <th>sentence2</th>\n",
+       "      <th>label</th>\n",
+       "      <th>genre</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>and now that was in fifty one that 's forty ye...</td>\n",
+       "      <td>It was already a problem forty years ago but n...</td>\n",
+       "      <td>neutral</td>\n",
+       "      <td>telephone</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>Jon could smell baked bread on the air and his...</td>\n",
+       "      <td>Jon smelt food in the air and was hungry .</td>\n",
+       "      <td>neutral</td>\n",
+       "      <td>fiction</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>it will be like Italian basketball with the uh...</td>\n",
+       "      <td>This type of Italian basketball is nothing lik...</td>\n",
+       "      <td>contradiction</td>\n",
+       "      <td>telephone</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "                                           sentence1  \\\n",
+       "0  and now that was in fifty one that 's forty ye...   \n",
+       "1  Jon could smell baked bread on the air and his...   \n",
+       "2  it will be like Italian basketball with the uh...   \n",
+       "\n",
+       "                                           sentence2          label      genre  \n",
+       "0  It was already a problem forty years ago but n...        neutral  telephone  \n",
+       "1         Jon smelt food in the air and was hungry .        neutral    fiction  \n",
+       "2  This type of Italian basketball is nothing lik...  contradiction  telephone  "
+      ]
+     },
+     "execution_count": 24,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "mnli_train.head(3)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "telephone     4270\n",
+       "slate         4026\n",
+       "travel        3985\n",
+       "government    3883\n",
+       "fiction       3836\n",
+       "Name: genre, dtype: int64"
+      ]
+     },
+     "execution_count": 25,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "mnli_train[\"genre\"].value_counts()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get tokenized training data\n",
+    "mnli_train[\"sentence1\"] = mnli_train[\"sentence1\"].apply(lambda x: x.split(\" \"))\n",
+    "mnli_train[\"sentence2\"] = mnli_train[\"sentence2\"].apply(lambda x: x.split(\" \"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get tokenized validation data\n",
+    "mnli_val[\"sentence1\"] = mnli_val[\"sentence1\"].apply(lambda x: x.split(\" \"))\n",
+    "mnli_val[\"sentence2\"] = mnli_val[\"sentence2\"].apply(lambda x: x.split(\" \"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get labels\n",
+    "mnli_train[\"label_num\"] = mnli_train[\"label\"].apply(lambda x: label_dict[x])\n",
+    "mnli_val[\"label_num\"] = mnli_val[\"label\"].apply(lambda x: label_dict[x])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Get train and val datasets for each __MNLI genre__. "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## telephone\n",
+    "mnli_train_telephone = mnli_train[mnli_train[\"genre\"]==\"telephone\"]\n",
+    "mnli_val_telephone = mnli_val[mnli_val[\"genre\"]==\"telephone\"]\n",
+    "## slate\n",
+    "mnli_train_slate = mnli_train[mnli_train[\"genre\"]==\"slate\"]\n",
+    "mnli_val_slate = mnli_val[mnli_val[\"genre\"]==\"slate\"]\n",
+    "## travel\n",
+    "mnli_train_travel = mnli_train[mnli_train[\"genre\"]==\"travel\"]\n",
+    "mnli_val_travel = mnli_val[mnli_val[\"genre\"]==\"travel\"]\n",
+    "## government\n",
+    "mnli_train_government = mnli_train[mnli_train[\"genre\"]==\"government\"]\n",
+    "mnli_val_government = mnli_val[mnli_val[\"genre\"]==\"government\"]\n",
+    "## fiction\n",
+    "mnli_train_fiction = mnli_train[mnli_train[\"genre\"]==\"fiction\"]\n",
+    "mnli_val_fiction = mnli_val[mnli_val[\"genre\"]==\"fiction\"]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 30,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get label arrays for each train and val dataset\n",
+    "\n",
+    "## whole MNLI dataset\n",
+    "mnli_train_labels = np.array(pd.get_dummies(np.array(mnli_train[\"label_num\"])))\n",
+    "mnli_val_labels = np.array(pd.get_dummies(np.array(mnli_val[\"label_num\"])))\n",
+    "## telephone\n",
+    "mnli_train_tel_labels = np.array(pd.get_dummies(np.array(mnli_train_telephone[\"label_num\"])))\n",
+    "mnli_val_tel_labels = np.array(pd.get_dummies(np.array(mnli_val_telephone[\"label_num\"])))\n",
+    "## slate\n",
+    "mnli_train_slate_labels = np.array(pd.get_dummies(np.array(mnli_train_slate[\"label_num\"])))\n",
+    "mnli_val_slate_labels = np.array(pd.get_dummies(np.array(mnli_val_slate[\"label_num\"])))\n",
+    "## travel\n",
+    "mnli_train_travel_labels = np.array(pd.get_dummies(np.array(mnli_train_travel[\"label_num\"])))\n",
+    "mnli_val_travel_labels = np.array(mnli_val_travel[\"label_num\"])\n",
+    "## gov\n",
+    "mnli_train_gov_labels = np.array(pd.get_dummies(np.array(mnli_train_government[\"label_num\"])))\n",
+    "mnli_val_gov_labels = np.array(pd.get_dummies(np.array(mnli_val_government[\"label_num\"])))\n",
+    "## fiction\n",
+    "mnli_train_fiction_labels = np.array(pd.get_dummies(np.array(mnli_train_fiction[\"label_num\"])))\n",
+    "mnli_val_fiction_labels = np.array(pd.get_dummies(np.array(mnli_val_fiction[\"label_num\"])))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Data Loaders"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## idx = token2id_wiki\n",
+    "\n",
+    "def token2index_dataset(tokens_data,idx_dict=None):\n",
+    "    indices_data = []\n",
+    "    for tokens in tokens_data:\n",
+    "        ## get index list for each sentence.\n",
+    "        index_list = [idx_dict[token] if token in \\\n",
+    "                      idx_dict else idx_dict[\"unk\"] for token in tokens]\n",
+    "        indices_data.append(index_list)\n",
+    "    return indices_data"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "__Note:__ I am getting the indices for Sentence 1 and Sentence 2 separately (not concatenating them at first from the beginning) since, in hyperparameter search I want to try more than one ways of interacting the hidden representations of the two sentences. "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## get train and val indices for both datasets\n",
+    "\n",
+    "## SNLI\n",
+    "snli_train_sentence1_indices = token2index_dataset([*snli_train[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "snli_train_sentence2_indices = token2index_dataset([*snli_train[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "snli_val_sentence1_indices = token2index_dataset([*snli_val[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "snli_val_sentence2_indices = token2index_dataset([*snli_val[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "\n",
+    "## MNLI\n",
+    "mnli_train_sentence1_indices = token2index_dataset([*mnli_train[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_sentence2_indices = token2index_dataset([*mnli_train[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_sentence1_indices = token2index_dataset([*mnli_val[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_sentence2_indices = token2index_dataset([*mnli_val[\"sentence2\"]],idx_dict=token2id_wiki)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 33,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## GENRES\n",
+    "\n",
+    "## telephone\n",
+    "mnli_train_s1_tel_ix = token2index_dataset([*mnli_train_telephone[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_s2_tel_ix = token2index_dataset([*mnli_train_telephone[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s1_tel_ix = token2index_dataset([*mnli_val_telephone[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s2_tel_ix = token2index_dataset([*mnli_val_telephone[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "## slate\n",
+    "mnli_train_s1_slate_ix = token2index_dataset([*mnli_train_slate[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_s2_slate_ix = token2index_dataset([*mnli_train_slate[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s1_slate_ix = token2index_dataset([*mnli_val_slate[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s2_slate_ix = token2index_dataset([*mnli_val_slate[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "## travel\n",
+    "mnli_train_s1_travel_ix = token2index_dataset([*mnli_train_travel[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_s2_travel_ix = token2index_dataset([*mnli_train_travel[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s1_travel_ix = token2index_dataset([*mnli_val_travel[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s2_travel_ix = token2index_dataset([*mnli_val_travel[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "## gov\n",
+    "mnli_train_s1_gov_ix = token2index_dataset([*mnli_train_government[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_s2_gov_ix = token2index_dataset([*mnli_train_government[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s1_gov_ix = token2index_dataset([*mnli_val_government[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s2_gov_ix = token2index_dataset([*mnli_val_government[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "## fiction\n",
+    "mnli_train_s1_fiction_ix = token2index_dataset([*mnli_train_fiction[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_train_s2_fiction_ix = token2index_dataset([*mnli_train_fiction[\"sentence2\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s1_fiction_ix = token2index_dataset([*mnli_val_fiction[\"sentence1\"]],idx_dict=token2id_wiki)\n",
+    "mnli_val_s2_fiction_ix = token2index_dataset([*mnli_val_fiction[\"sentence2\"]],idx_dict=token2id_wiki)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 34,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# ## get concatenated tokens\n",
+    "# snli_train_concat_indices = [snli_train_sentence1_indices[i]+snli_train_sentence2_indices[i] for i in [*range(len(snli_train_sentence1_indices))]]\n",
+    "# snli_val_concat_indices = [snli_val_sentence1_indices[i]+snli_val_sentence2_indices[i] for i in [*range(len(snli_val_sentence1_indices))]]\n",
+    "\n",
+    "# mnli_train_concat_indices = [mnli_train_sentence1_indices[i]+mnli_train_sentence2_indices[i] for i in [*range(len(mnli_train_sentence1_indices))]]\n",
+    "# mnli_val_concat_indices = [mnli_val_sentence1_indices[i]+mnli_val_sentence2_indices[i] for i in [*range(len(mnli_val_sentence1_indices))]]\n",
+    "\n",
+    "# ## GENRES\n",
+    "\n",
+    "# ## telephone\n",
+    "# mnli_train_tel_concat_indices = [mnli_train_s1_tel_ix[i]+mnli_train_s2_tel_ix[i] for i in [*range(len(mnli_train_s1_tel_ix))]]\n",
+    "# mnli_val_tel_concat_indices = [mnli_val_s1_tel_ix[i]+mnli_val_s2_tel_ix[i] for i in [*range(len(mnli_val_s1_tel_ix))]]\n",
+    "# ## slate\n",
+    "# mnli_train_slate_concat_indices = [mnli_train_s1_slate_ix[i]+mnli_train_s2_slate_ix[i] for i in [*range(len(mnli_train_s2_slate_ix))]]\n",
+    "# mnli_val_slate_concat_indices = [mnli_val_s1_slate_ix[i]+mnli_val_s2_slate_ix[i] for i in [*range(len(mnli_val_s2_slate_ix))]]\n",
+    "# ## travel\n",
+    "# mnli_train_travel_concat_indices = [mnli_train_s1_travel_ix[i]+mnli_train_s2_travel_ix[i] for i in [*range(len(mnli_train_s2_travel_ix))]]\n",
+    "# mnli_val_travel_concat_indices = [mnli_val_s1_travel_ix[i]+mnli_val_s2_travel_ix[i] for i in [*range(len(mnli_val_s2_travel_ix))]]\n",
+    "# ## gov\n",
+    "# mnli_train_gov_concat_indices = [mnli_train_s1_gov_ix[i]+mnli_train_s2_gov_ix[i] for i in [*range(len(mnli_train_s2_gov_ix))]]\n",
+    "# mnli_val_gov_concat_indices = [mnli_val_s1_gov_ix[i]+mnli_val_s2_gov_ix[i] for i in [*range(len(mnli_val_s2_gov_ix))]]\n",
+    "# ## fiction\n",
+    "# mnli_train_fiction_concat_indices = [mnli_train_s1_fiction_ix[i]+mnli_train_s2_fiction_ix[i] for i in [*range(len(mnli_train_s2_fiction_ix))]]\n",
+    "# mnli_val_fiction_concat_indices = [mnli_val_s1_fiction_ix[i]+mnli_val_s2_fiction_ix[i] for i in [*range(len(mnli_val_s2_fiction_ix))]]\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Getting training and validation set __labels__ (targets) for both datasets. "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 35,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# ## SNLI\n",
+    "# snli_train_labels = np.array(snli_train[\"label_num\"])\n",
+    "# snli_val_labels = np.array(snli_val[\"label_num\"])\n",
+    "\n",
+    "# ## MNLI\n",
+    "# mnli_train_labels = np.array(mnli_train[\"label_num\"])\n",
+    "# mnli_val_labels = np.array(mnli_val[\"label_num\"])\n",
+    "\n",
+    "# ## GENRES\n",
+    "\n",
+    "# ## telephone\n",
+    "# mnli_train_tel_labels = np.array(mnli_train_telephone[\"label_num\"])\n",
+    "# mnli_val_tel_labels = np.array(mnli_val_telephone[\"label_num\"])\n",
+    "# ## slate\n",
+    "# mnli_train_slate_labels = np.array(mnli_train_slate[\"label_num\"])\n",
+    "# mnli_val_slate_labels = np.array(mnli_val_slate[\"label_num\"])\n",
+    "# ## travel\n",
+    "# mnli_train_travel_labels = np.array(mnli_train_travel[\"label_num\"])\n",
+    "# mnli_val_travel_labels = np.array(mnli_val_travel[\"label_num\"])\n",
+    "# ## gov\n",
+    "# mnli_train_gov_labels = np.array(mnli_train_government[\"label_num\"])\n",
+    "# mnli_val_gov_labels = np.array(mnli_val_government[\"label_num\"])\n",
+    "# ## fiction\n",
+    "# mnli_train_fiction_labels = np.array(mnli_train_fiction[\"label_num\"])\n",
+    "# mnli_val_fiction_labels = np.array(mnli_val_fiction[\"label_num\"])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Function to get pretrained word embeddings from the table"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 36,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## code taken from lab3\n",
+    "\n",
+    "## SNLI\n",
+    "MAX_SENTENCE_LENGTH = 200\n",
+    "snli_train_targets = snli_train_labels\n",
+    "snli_val_targets = snli_val_labels\n",
+    "\n",
+    "from torch.utils.data import Dataset\n",
+    "\n",
+    "class SNLI_Dataset(Dataset):\n",
+    "    \"\"\"\n",
+    "    Class that represents a train/validation/test dataset that's readable for PyTorch\n",
+    "    Note that this class inherits torch.utils.data.Dataset\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    def __init__(self, data_list, target_list):\n",
+    "        \"\"\"\n",
+    "        @param data_list: list of newsgroup tokens \n",
+    "        @param target_list: list of newsgroup targets \n",
+    "\n",
+    "        \"\"\"\n",
+    "        self.data_list = data_list\n",
+    "        self.target_list = target_list\n",
+    "        assert (len(self.data_list) == len(self.target_list))\n",
+    "\n",
+    "    def __len__(self):\n",
+    "        return len(self.data_list)\n",
+    "        \n",
+    "    def __getitem__(self, key):\n",
+    "        \"\"\"\n",
+    "        Triggered when you call dataset[i]\n",
+    "        \"\"\"\n",
+    "        \n",
+    "        token_idx = self.data_list[key][:MAX_SENTENCE_LENGTH]\n",
+    "        label = self.target_list[key]\n",
+    "        return [token_idx, len(token_idx), label]\n",
+    "\n",
+    "def snli_func(batch):\n",
+    "    \"\"\"\n",
+    "    Customized function for DataLoader that dynamically pads the batch so that all \n",
+    "    data have the same length\n",
+    "    \"\"\"\n",
+    "    data_list = []\n",
+    "    label_list = []\n",
+    "    length_list = []\n",
+    "\n",
+    "    for datum in batch:\n",
+    "        label_list.append(datum[2])\n",
+    "        length_list.append(datum[1])\n",
+    "#         data_list.append(datum[0])\n",
+    "        \n",
+    "    # padding\n",
+    "    for datum in batch:\n",
+    "        padded_vec = np.pad(np.array(datum[0]), \n",
+    "                                pad_width=((0,MAX_SENTENCE_LENGTH-datum[1])), \n",
+    "                                mode=\"constant\", constant_values=0)\n",
+    "        data_list.append(padded_vec)\n",
+    "        \n",
+    "    return [torch.from_numpy(np.array(data_list)), \n",
+    "            torch.LongTensor(length_list), \n",
+    "            torch.LongTensor(label_list)]\n",
+    "\n",
+    "# create pytorch dataloader\n",
+    "\n",
+    "# since I'm loading the sentences separately, I set shulle to False \n",
+    "\n",
+    "BATCH_SIZE = 32\n",
+    "snli_train_dataset_s1 = SNLI_Dataset(snli_train_sentence1_indices,snli_train_labels)\n",
+    "snli_train_dataset_s2 = SNLI_Dataset(snli_train_sentence2_indices,snli_train_labels)\n",
+    "snli_train_loader_s1 = torch.utils.data.DataLoader(dataset=snli_train_dataset_s1,\n",
+    "                                               batch_size=BATCH_SIZE,\n",
+    "                                               collate_fn=snli_func,\n",
+    "                                               shuffle=False)\n",
+    "snli_train_loader_s2 = torch.utils.data.DataLoader(dataset=snli_train_dataset_s2,\n",
+    "                                               batch_size=BATCH_SIZE,\n",
+    "                                               collate_fn=snli_func,\n",
+    "                                               shuffle=False)\n",
+    "\n",
+    "snli_val_dataset_s1 = SNLI_Dataset(snli_val_sentence1_indices, snli_val_labels)\n",
+    "snli_val_dataset_s2 = SNLI_Dataset(snli_val_sentence2_indices, snli_val_labels)\n",
+    "snli_val_loader_s1 = torch.utils.data.DataLoader(dataset=snli_val_dataset_s1,\n",
+    "                                             batch_size=BATCH_SIZE,\n",
+    "                                             collate_fn=snli_func,\n",
+    "                                             shuffle=False)\n",
+    "snli_val_loader_s2 = torch.utils.data.DataLoader(dataset=snli_val_dataset_s2,\n",
+    "                                             batch_size=BATCH_SIZE,\n",
+    "                                             collate_fn=snli_func,\n",
+    "                                             shuffle=False)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "I will load two strings separately, and get the hidden representations as they're output from the encoder - again separately, then interact them to get the softmax."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 37,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "## TODO\n",
+    "\n",
+    "## code taken from lab3\n",
+    "## mnli\n",
+    "MAX_SENTENCE_LENGTH = 200\n",
+    "mnli_train_targets = mnli_train_labels\n",
+    "mnli_val_targets = mnli_val_labels\n",
+    "\n",
+    "from torch.utils.data import Dataset\n",
+    "\n",
+    "class MNLI_Dataset(Dataset):\n",
+    "    \"\"\"\n",
+    "    Class that represents a train/validation/test dataset that's readable for PyTorch\n",
+    "    Note that this class inherits torch.utils.data.Dataset\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    def __init__(self, data_list, target_list):\n",
+    "        \"\"\"\n",
+    "        @param data_list: list of newsgroup tokens \n",
+    "        @param target_list: list of newsgroup targets \n",
+    "\n",
+    "        \"\"\"\n",
+    "        self.data_list = data_list\n",
+    "        self.target_list = target_list\n",
+    "        assert (len(self.data_list) == len(self.target_list))\n",
+    "\n",
+    "    def __len__(self):\n",
+    "        return len(self.data_list)\n",
+    "        \n",
+    "    def __getitem__(self, key):\n",
+    "        \"\"\"\n",
+    "        Triggered when you call dataset[i]\n",
+    "        \"\"\"\n",
+    "        \n",
+    "        token_idx = self.data_list[key][:MAX_SENTENCE_LENGTH]\n",
+    "        label = self.target_list[key]\n",
+    "        return [token_idx, len(token_idx), label]\n",
+    "\n",
+    "def mnli_func(batch):\n",
+    "    \"\"\"\n",
+    "    Customized function for DataLoader that dynamically pads the batch so that all \n",
+    "    data have the same length\n",
+    "    \"\"\"\n",
+    "    data_list = []\n",
+    "    label_list = []\n",
+    "    length_list = []\n",
+    "\n",
+    "    for datum in batch:\n",
+    "        label_list.append(datum[2])\n",
+    "        length_list.append(datum[1])\n",
+    "        \n",
+    "    # padding\n",
+    "    for datum in batch:\n",
+    "        padded_vec = np.pad(np.array(datum[0]), \n",
+    "                                pad_width=((0,MAX_SENTENCE_LENGTH-datum[1])), \n",
+    "                                mode=\"constant\", constant_values=0)\n",
+    "            \n",
+    "        data_list.append(padded_vec)\n",
+    "        \n",
+    "        \n",
+    "        \n",
+    "    return [torch.from_numpy(np.array(data_list)), \n",
+    "            torch.LongTensor(length_list), \n",
+    "            torch.LongTensor(label_list)]\n",
+    "\n",
+    "# create pytorch dataloader\n",
+    "\n",
+    "BATCH_SIZE = 32\n",
+    "mnli_train_dataset_s1 = MNLI_Dataset(mnli_train_sentence1_indices,mnli_train_labels)\n",
+    "mnli_train_loader_s1 = torch.utils.data.DataLoader(dataset=mnli_train_dataset_s1,\n",
+    "                                               batch_size=BATCH_SIZE,\n",
+    "                                               collate_fn=mnli_func,\n",
+    "                                               shuffle=False)\n",
+    "mnli_train_dataset_s2 = MNLI_Dataset(mnli_train_sentence2_indices,mnli_train_labels)\n",
+    "mnli_train_loader_s2 = torch.utils.data.DataLoader(dataset=mnli_train_dataset_s2,\n",
+    "                                               batch_size=BATCH_SIZE,\n",
+    "                                               collate_fn=mnli_func,\n",
+    "                                               shuffle=False)\n",
+    "\n",
+    "\n",
+    "mnli_val_dataset_s1 = MNLI_Dataset(mnli_val_sentence1_indices, mnli_val_labels)\n",
+    "mnli_val_loader_s1 = torch.utils.data.DataLoader(dataset=mnli_val_dataset_s1,\n",
+    "                                             batch_size=BATCH_SIZE,\n",
+    "                                             collate_fn=mnli_func,\n",
+    "                                             shuffle=False)\n",
+    "\n",
+    "mnli_val_dataset_s2 = MNLI_Dataset(mnli_val_sentence2_indices, mnli_val_labels)\n",
+    "mnli_val_loader_s2 = torch.utils.data.DataLoader(dataset=mnli_val_dataset_s2,\n",
+    "                                             batch_size=BATCH_SIZE,\n",
+    "                                             collate_fn=mnli_func,\n",
+    "                                             shuffle=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 38,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "\"and now that was in fifty one that 's forty years ago that it was already a problem so it 's now uh\""
+      ]
+     },
+     "execution_count": 38,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "(\" \").join([id2token_wiki[x] for x in [*mnli_train_dataset_s1][0][0]])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 39,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "\"It was already a problem forty years ago but now it 's ten times worse !\""
+      ]
+     },
+     "execution_count": 39,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "(\" \").join([id2token_wiki[x] for x in [*mnli_train_dataset_s2][0][0]])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 40,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "[tensor([[  20,  363,    6,  ...,    0,    0,    0],\n",
+       "         [1081, 5152, 2634,  ...,    0,    0,    0],\n",
+       "         [ 137,   13, 4046,  ...,    0,    0,    0],\n",
+       "         ...,\n",
+       "         [6128,   95,    5,  ...,    0,    0,    0],\n",
+       "         [1095, 3544,   62,  ...,    0,    0,    0],\n",
+       "         [ 853,  976,   13,  ...,    0,    0,    0]]),\n",
+       " tensor([ 9, 11, 13,  5,  8,  6, 27,  9, 10,  8,  6,  7, 13, 12,  6,  7,  9, 15,\n",
+       "         13, 15, 11, 10,  6, 22, 13, 13, 11, 11,  5,  7,  8,  7]),\n",
+       " tensor([[1, 0, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [1, 0, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [0, 0, 1],\n",
+       "         [0, 0, 1],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [1, 0, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 1, 0],\n",
+       "         [0, 0, 1],\n",
+       "         [0, 0, 1],\n",
+       "         [1, 0, 0],\n",
+       "         [1, 0, 0],\n",
+       "         [0, 1, 0]])]"
+      ]
+     },
+     "execution_count": 40,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "[*mnli_train_loader_s2][29]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Part 2: Model\n",
+    "\n",
+    "The model is trained on SNLI training set. The best model is chosen using SNLI validation set, then the best model is evaluated on each genre in MultiNLI validation set. \n",
+    "\n",
+    "We will use an encoder (either a CNN or an RNN) to map each string of text (hypothesis and premise) to a fixed-dimension vector representation. \n",
+    "\n",
+    "- We will interact the two hidden representations and output a __3-class softmax__. \n",
+    "\n",
+    "- To keep things simple, we will simply __concatenate__ the two representations, and feed them through a network of __2 fully-connected layers__. \n",
+    "\n",
+    "- For the encoder, we want the following:\n",
+    "\n",
+    "### Part 2.1: CNN\n",
+    "For the CNN, \n",
+    "- A 2-layer 1-D convolutional network with ReLU activations \n",
+    "- A max-pool at the end to compress the hidden representation into a single vector."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# modify to accept hard coded arguments\n",
+    "# batch_size = 8\n",
+    "# batch_size = 16\n",
+    "epochs = 20\n",
+    "no_cuda = False\n",
+    "log_interval = 1\n",
+    "\n",
+    "cuda = not no_cuda and torch.cuda.is_available()\n",
+    "# cuda = False\n",
+    "\n",
+    "seed = 1\n",
+    "torch.manual_seed(seed)\n",
+    "\n",
+    "# device = torch.device(\"cuda\" if args.cuda else \"cpu\")\n",
+    "device = torch.device(\"cuda\" if cuda else \"cpu\")\n",
+    "\n",
+    "# kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}\n",
+    "kwargs = {'num_workers': 1, 'pin_memory': True} if cuda else {}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#  # FloatTensor containing pretrained weights\n",
+    "# >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])\n",
+    "# >> embedding = nn.Embedding.from_pretrained(weight)\n",
+    "# >> # Get embeddings for index 1\n",
+    "# >> input = torch.LongTensor([1])\n",
+    "# >> embedding(input)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "max_train_length = max([snli_train_dataset_s1[x][1] for x in range(len(snli_train_dataset_s1))])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# max([snli_train_dataset_s2[x][1] for x in range(len(snli_train_dataset_s2))])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "max_val_length = max([snli_val_dataset_s1[x][1] for x in range(len(snli_val_dataset_s1))])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# max([snli_val_dataset_s2[x][1] for x in range(len(snli_val_dataset_s2))])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# train_dataset = [*snli_train_dataset]\n",
+    "\n",
+    "## init hidden or forward?\n",
+    "\n",
+    "class CNN(nn.Module):\n",
+    "    \n",
+    "    def __init__(self,emb_size,\n",
+    "                 hidden_size,\n",
+    "                 hidden_size_2,\n",
+    "                 num_classes,\n",
+    "                 vocab_size,\n",
+    "                 kernel_size,\n",
+    "                 padding,\n",
+    "                 stride,\n",
+    "                 percent_dropout):\n",
+    "\n",
+    "        super(CNN, self).__init__()\n",
+    "\n",
+    "        self.emb_size = emb_size\n",
+    "        self.kernel_size = kernel_size\n",
+    "        self.padding = padding\n",
+    "        self.hidden_size = hidden_size\n",
+    "        self.hidden_size_2 = hidden_size_2\n",
+    "        self.stride = stride\n",
+    "\n",
+    "        ## use pretrained wiki embeddings\n",
+    "        wiki_embed_table = torch.tensor(table_lookup)\n",
+    "        embedding = nn.Embedding.from_pretrained(wiki_embed_table)\n",
+    "        self.embedding = embedding\n",
+    "        \n",
+    "        ## 2 1d convolutional layers\n",
+    "        ## conv1\n",
+    "        self.conv1 = nn.Conv1d(emb_size, hidden_size,\n",
+    "                               kernel_size=self.kernel_size, \n",
+    "                               padding=self.padding)\n",
+    "        ## conv2\n",
+    "        self.conv2 = nn.Conv1d(hidden_size, hidden_size_2,\n",
+    "                               kernel_size=self.kernel_size, \n",
+    "                               padding=self.padding)\n",
+    "        \n",
+    "        ## ReLU activations\n",
+    "        self.ReLU1 = nn.ReLU()\n",
+    "        self.ReLU2 = nn.ReLU()\n",
+    "        \n",
+    "        ## Maxpool\n",
+    "#         self.maxpool = torch.max(kernel_size=self.kernel_size,\n",
+    "#                                             stride=self.stride,\n",
+    "#                                             return_indices = True,\n",
+    "#                                    )\n",
+    "        \n",
+    "        ## dropout\n",
+    "        self.dropout = nn.Dropout(percent_dropout)\n",
+    "        ## Fully Connected Layers for Concatenated \n",
+    "        ## Hidden Representations\n",
+    "        hidden_out = int(1+(hidden_size_2-self.kernel_size + 2*self.padding)/self.stride)\n",
+    "        print (\"hidden out - \" +str(hidden_out))\n",
+    "#         self.fc1 = nn.Linear(hidden_out, hidden_size)\n",
+    "        self.fc1 = nn.Linear(hidden_out*2, hidden_size_2)\n",
+    "        self.fc2 = nn.Linear(hidden_size_2, 3)\n",
+    "        \n",
+    "\n",
+    "    def forward(self, x1, x2, lengths1, lengths2):\n",
+    "        batch_size_1, seq_len_1 = x1.size()\n",
+    "        batch_size_2, seq_len_2 = x2.size()\n",
+    "\n",
+    "        ## initialize batch embeddings for sentence 1\n",
+    "        embeds_1 = []\n",
+    "        embeds_2 = []\n",
+    "        ## get embeddings for each sentence couple in batch\n",
+    "        ## exclude zero-pads at the end, if you don't slice by length \n",
+    "        ## the model will get table_lookup[0] for 0-pads\n",
+    "        MAX_SENTENCE_LENGTH = max_train_length\n",
+    "        \n",
+    "        for arr in [*range(len(x1))]: \n",
+    "            input = torch.LongTensor(x1[arr][:int(lengths1[arr])].cpu().numpy())\n",
+    "            embed = self.embedding(input)\n",
+    "            ## pad again\n",
+    "            length_to_pad = MAX_SENTENCE_LENGTH - embed.size()[0]\n",
+    "            embed = np.vstack((embed.cpu().numpy(),np.zeros((length_to_pad,300))))\n",
+    "            embeds_1.append(embed)\n",
+    "            \n",
+    "        embeds_1 = torch.FloatTensor(embeds_1)\n",
+    "            \n",
+    "        for arr in [*range(len(x2))]: \n",
+    "            input = torch.LongTensor(x2[arr][:int(lengths2[arr])].cpu().numpy())\n",
+    "            embed = self.embedding(input)\n",
+    "            ## pad again\n",
+    "            length_to_pad = MAX_SENTENCE_LENGTH - embed.size()[0]\n",
+    "            embed = np.vstack((embed.cpu().numpy(),np.zeros((length_to_pad,300))))\n",
+    "            embeds_2.append(embed)\n",
+    "\n",
+    "        embeds_2 = torch.FloatTensor(embeds_2)\n",
+    "\n",
+    "        ## FIRST 1D CONVOLUTION\n",
+    "        ## sentence 1 - conv1\n",
+    "        s1_conv1 = self.conv1(torch.transpose(embeds_1, 1, 2)).transpose(1,2)\n",
+    "        ## sentence 2 - conv 1\n",
+    "        s2_conv1 = self.conv1(torch.transpose(embeds_2, 1, 2)).transpose(1,2)\n",
+    "\n",
+    "        ## FIRST RELU\n",
+    "        ## sentence 1 - ReLU1\n",
+    "        s1_ReLU1 = self.ReLU1(s1_conv1)\n",
+    "        ## sentence 2 - ReLU1\n",
+    "        s2_ReLU1 = self.ReLU1(s2_conv1)\n",
+    "\n",
+    "        ## SECOND 1D CONVOLUTION\n",
+    "        ## sentence 1 - conv2\n",
+    "        s1_conv2 = self.conv2(s1_ReLU1.transpose(1,2)).transpose(1,2)\n",
+    "        ## sentence 2 - conv2\n",
+    "        s2_conv2 = self.conv2(s2_ReLU1.transpose(1,2)).transpose(1,2)\n",
+    "        \n",
+    "        ## SECOND RELU\n",
+    "        ## sentence 1 - ReLU2\n",
+    "        s1_ReLU2 = self.ReLU2(s1_conv2)\n",
+    "        ## sentence 2 - ReLU2\n",
+    "        s2_ReLU2 = self.ReLU2(s2_conv2)\n",
+    "        \n",
+    "        ## MAX-POOL - dropout\n",
+    "        s1_hidden = torch.max(self.dropout(s1_ReLU2),1)\n",
+    "        s2_hidden = torch.max(self.dropout(s2_ReLU2),1)\n",
+    "\n",
+    "        ## CONCATENATION\n",
+    "        hidden = torch.cat((s1_hidden[0],s2_hidden[0]),1)\n",
+    "\n",
+    "        ## FC LAYERS\n",
+    "        hidden = self.fc1(hidden)\n",
+    "        hidden = F.dropout(hidden, training=self.training)\n",
+    "        hidden = self.fc2(hidden)\n",
+    "\n",
+    "        ## SOFTMAX\n",
+    "        out = F.softmax(hidden)\n",
+    "#         out = F.log_softmax(hidden)\n",
+    "\n",
+    "\n",
+    "        #         print (\"out = \"+str(out))\n",
+    "        return out"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Try Elementwise"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import numpy as np"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "wiki_embed_table = torch.Tensor(table_lookup)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "model = CNN(emb_size=300, \n",
+    "            hidden_size=512,\n",
+    "            hidden_size_2 = 128,\n",
+    "            num_classes=3, \n",
+    "            vocab_size=wiki_embed_table.size()[0],\n",
+    "            kernel_size=3,\n",
+    "            padding=1,\n",
+    "            stride=1,\n",
+    "            percent_dropout=0.1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# torch.save(model.state_dict(),\"model\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# torch.load(\"model\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# the_model = CNN(emb_size=300, \n",
+    "#             hidden_size=60,\n",
+    "#             num_classes=3, \n",
+    "#             vocab_size=wiki_embed_table.size()[0],\n",
+    "#             kernel_size=3,\n",
+    "#             padding=1,\n",
+    "#             stride=1,\n",
+    "#             percent_dropout=0.1)\n",
+    "\n",
+    "# the_model.load_state_dict(torch.load(\"model\"))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "learning_rate = 1e-3\n",
+    "num_epochs = 10 # number epoch to train"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# criterion = torch.nn.CrossEntropyLoss()\n",
+    "criterion = torch.nn.NLLLoss()\n",
+    "# optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)\n",
+    "optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# [*enumerate(zip(snli_train_loader_s1,snli_train_loader_s2))][0]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "log_interval = 20\n",
+    "def train(epoch):\n",
+    "    model.train()\n",
+    "    train_loss = 0\n",
+    "    ## initialize loss hist\n",
+    "    loss_history = []\n",
+    "    for batch_idx, ([data_s1, lengths_s1, labels], \n",
+    "    [data_s2, lengths_s2, labels]) in enumerate(zip(snli_train_loader_s1,\n",
+    "                                                 snli_train_loader_s2)):\n",
+    "        \n",
+    "        data_s1 = data_s1\n",
+    "        data_s2 = data_s2\n",
+    "#         print(\"Data transfer to device completed.\")\n",
+    "        \n",
+    "        optimizer.zero_grad()\n",
+    "        output = model(data_s1,data_s2,lengths_s1,lengths_s2)\n",
+    "#         print (\"output = \"+str(output))\n",
+    "        loss = criterion(output, labels)\n",
+    "#         print (\"loss = \"+str(loss))\n",
+    "        loss.backward()\n",
+    "        \n",
+    "        loss_history.append(loss.item())\n",
+    "        \n",
+    "        optimizer.step()\n",
+    "        # if batch_idx % args.log_interval == 0:\n",
+    "        if batch_idx % log_interval == 0:\n",
+    "            print('Train Epoch: {} [{}/{} ({:.0f}%)]\\tLoss: {:.12f}'.format(\n",
+    "                epoch, batch_idx * len(data_s1), len(snli_train_loader_s1.dataset),\n",
+    "                100. * batch_idx / len(snli_train_loader_s1),\n",
+    "                loss.item() / len(data_s1)))\n",
+    "\n",
+    "    print('====> Epoch: {} Average loss: {:.12f}'.format(\n",
+    "          epoch, train_loss / len(snli_train_loader_s1.dataset)))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "# for epoch in range(1, epochs + 1):\n",
+    "#     print(\"Epoch = \" + str(epoch) + \" / \" + str(epochs))\n",
+    "\n",
+    "#     train(epoch)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "def test_model(loader1, loader2, model):\n",
+    "    \"\"\"\n",
+    "    Help function that tests the model's performance on a dataset\n",
+    "    @param: loader - data loader for the dataset to test against\n",
+    "    \"\"\"\n",
+    "    correct = 0\n",
+    "    total = 0\n",
+    "    model.eval()\n",
+    "    for batch_idx, ([data_s1, lengths_s1, labels], \n",
+    "    [data_s2, lengths_s2, labels]) in enumerate(zip(loader1,\n",
+    "                                                 loader2)):\n",
+    "        \n",
+    "        outputs = model(data_s1, data_s2, lengths_s1, lengths_s2)\n",
+    "        predicted = torch.max(outputs, 1)[1]\n",
+    "#         print (\"preds=\"+str(predicted))\n",
+    "        \n",
+    "        total += labels.size(0)\n",
+    "        correct += np.sum((predicted.detach().numpy() == labels.numpy()).astype(int))\n",
+    "\n",
+    "    return (correct / total)\n",
+    "\n",
+    "total_step = len(snli_train_loader_s1)\n",
+    "num_epochs = 10\n",
+    "loss_hist = []\n",
+    "val_accuracy = []\n",
+    "train_accuracy = []\n",
+    "\n",
+    "for epoch in range(num_epochs):\n",
+    "    for batch_idx, ([data_s1, lengths_s1, labels], \n",
+    "    [data_s2, lengths_s2, labels]) in enumerate(zip(snli_train_loader_s1,\n",
+    "                                                 snli_train_loader_s2)):\n",
+    "        \n",
+    "        model.train()\n",
+    "        optimizer.zero_grad()\n",
+    "        # Forward pass\n",
+    "        \n",
+    "        ## Compute accuracy\n",
+    "        outputs = model(data_s1,data_s2,lengths_s1,lengths_s2)\n",
+    "        predicted = torch.max(outputs, 1)[1]\n",
+    "        loss = criterion(outputs, labels)\n",
+    "        train_acc = np.sum((predicted.detach().numpy() == labels.numpy()).\\\n",
+    "                           astype(int))/predicted.size(0)\n",
+    "        \n",
+    "    \n",
+    "        if batch_idx % 25 == 0:\n",
+    "            train_accuracy.append(train_acc)\n",
+    "            loss_hist.append(loss)\n",
+    "            \n",
+    "        ## Plot training accuracy\n",
+    "        if batch_idx % 200 == 0:\n",
+    "            plt.figure(figsize=(20,10))\n",
+    "            plt.plot(train_accuracy,color=\"b\",linewidth=3,alpha=0.6,marker=\"o\")\n",
+    "            plt.rcParams[\"font.size\"] = 16\n",
+    "            plt.title(\"Training Accuracy\")\n",
+    "            plt.xlabel(\"Iterations\")\n",
+    "            plt.ylabel(\"Accuracy\")\n",
+    "            plt.show()\n",
+    "            print (\"Cross Entropy = \"+str(loss))\n",
+    "            torch.save(model.state_dict(),\"model\")\n",
+    "\n",
+    "        # Backward and optimize\n",
+    "        loss.backward()\n",
+    "        optimizer.step()\n",
+    "        \n",
+    "        \n",
+    "        if batch_idx > 0 and batch_idx % 200 == 0:\n",
+    "            # validate\n",
+    "            val_acc = test_model(snli_val_loader_s1,snli_val_loader_s2, model)\n",
+    "            val_accuracy.append(val_acc)\n",
+    "            print('Epoch: [{}/{}], Step: [{}/{}], Validation Acc: {}'.format(\n",
+    "                       epoch+1, num_epochs, batch_idx+1, len(snli_train_loader_s1), val_acc))\n",
+    "        \n",
+    "        ## Plot validation accuracy\n",
+    "        if batch_idx > 0 and batch_idx % 400 == 0:\n",
+    "            plt.figure(figsize=(20,10))\n",
+    "            plt.plot(val_accuracy,color=\"c\",linewidth=3,alpha=0.6,marker=\"o\")\n",
+    "            plt.rcParams[\"font.size\"] = 16\n",
+    "            plt.title(\"Validation Accuracy\")\n",
+    "            plt.xlabel(\"Iterations\")\n",
+    "            plt.ylabel(\"Accuracy\")\n",
+    "            plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Hyperparameter Search\n",
+    "\n",
+    "The hyperparameters included in the hyperparameter search space are;\n",
+    "\n",
+    "- The size of the hidden dimension of the CNN,\n",
+    "- The kernel size of the CNN,\n",
+    "- Experiment with different ways of interacting the two encoded sentences (concatenation, element-wise multiplication, outer multiplication etc)\n",
+    "- Regularization (e.g. weight decay, dropout).\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Part 2.2 RNN\n",
+    "For the RNN, a single-layer, bi-directional GRU will suffice. We can take the last hidden state as the encoder output. (In the case of bi-directional, the last of each direction, although PyTorch takes care of this.)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class RNN(nn.Module):\n",
+    "    def __init__(self, emb_size, hidden_size, num_layers, num_classes, vocab_size):\n",
+    "        # RNN Accepts the following hyperparams:\n",
+    "        # emb_size: Embedding Size\n",
+    "        # hidden_size: Hidden Size of layer in RNN\n",
+    "        # num_layers: number of layers in RNN\n",
+    "        # num_classes: number of output classes\n",
+    "        # vocab_size: vocabulary size\n",
+    "        super(RNN, self).__init__()\n",
+    "\n",
+    "        self.num_layers, self.hidden_size = num_layers, hidden_size\n",
+    "        ## use pretrained wiki embeddings\n",
+    "        wiki_embed_table = torch.tensor(table_lookup)\n",
+    "        embedding = nn.Embedding.from_pretrained(wiki_embed_table)\n",
+    "        self.embedding = embedding\n",
+    "        ## the following line\n",
+    "        ## responsible for creating the rnn in pytorch\n",
+    "        self.rnn = nn.RNN(emb_size, hidden_size, num_layers, batch_first=True)\n",
+    "        self.linear = nn.Linear(hidden_size, num_classes)\n",
+    "\n",
+    "    def init_hidden(self, batch_size):\n",
+    "        # Function initializes the activation of recurrent neural net at timestep 0\n",
+    "        # Needs to be in format (num_layers, batch_size, hidden_size)\n",
+    "        hidden = torch.randn(self.num_layers, batch_size, self.hidden_size)\n",
+    "\n",
+    "        return hidden\n",
+    "\n",
+    "    def forward(self, x, lengths):\n",
+    "        # reset hidden state\n",
+    "\n",
+    "        batch_size, seq_len = x.size()\n",
+    "\n",
+    "        self.hidden = self.init_hidden(batch_size)\n",
+    "        \n",
+    "        ## no need to pad here of course\n",
+    "\n",
+    "        # get embedding of characters\n",
+    "        embed = self.embedding(x)\n",
+    "        ## pack padded sequence - transforms pytorch tensor into padded sequence\n",
+    "        ## keep in mind that pytorch expects your embedding size to be in descending order\n",
+    "        embed = torch.nn.utils.rnn.pack_padded_sequence(embed, lengths.numpy(), batch_first=True)\n",
+    "        # fprop though RNN - pass embedding to the RNN\n",
+    "        rnn_out, self.hidden = self.rnn(embed, self.hidden)\n",
+    "        # undo packing\n",
+    "        rnn_out, _ = torch.nn.utils.rnn.pad_packed_sequence(rnn_out, batch_first=True)\n",
+    "        # sum hidden activations of RNN across time\n",
+    "        rnn_out = torch.sum(rnn_out, dim=1)\n",
+    "\n",
+    "        logits = self.linear(rnn_out)\n",
+    "        return logits"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def test_model(loader, model):\n",
+    "    \"\"\"\n",
+    "    Help function that tests the model's performance on a dataset\n",
+    "    @param: loader - data loader for the dataset to test against\n",
+    "    \"\"\"\n",
+    "    correct = 0\n",
+    "    total = 0\n",
+    "    model.eval()\n",
+    "    for data, lengths, labels in loader:\n",
+    "        data_batch, lengths_batch, label_batch = data, lengths, labels\n",
+    "        outputs = F.softmax(model(data_batch, lengths_batch), dim=1)\n",
+    "        predicted = outputs.max(1, keepdim=True)[1]\n",
+    "\n",
+    "        total += labels.size(0)\n",
+    "        correct += predicted.eq(labels.view_as(predicted)).sum().item()\n",
+    "    return (100 * correct / total)\n",
+    "\n",
+    "model = RNN(emb_size=100, hidden_size=200, num_layers=2, num_classes=5, vocab_size=len(id2char))\n",
+    "\n",
+    "learning_rate = 3e-4\n",
+    "num_epochs = 10 # number epoch to train\n",
+    "\n",
+    "# Criterion and Optimizer\n",
+    "criterion = torch.nn.CrossEntropyLoss()\n",
+    "optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)\n",
+    "\n",
+    "# Train the model\n",
+    "total_step = len(train_loader)\n",
+    "\n",
+    "for epoch in range(num_epochs):\n",
+    "    for i, (data, lengths, labels) in enumerate(train_loader):\n",
+    "        model.train()\n",
+    "        optimizer.zero_grad()\n",
+    "        # Forward pass\n",
+    "        outputs = model(data, lengths)\n",
+    "        loss = criterion(outputs, labels)\n",
+    "\n",
+    "        # Backward and optimize\n",
+    "        loss.backward()\n",
+    "        optimizer.step()\n",
+    "        # validate every 100 iterations\n",
+    "        if i > 0 and i % 100 == 0:\n",
+    "            # validate\n",
+    "            val_acc = test_model(val_loader, model)\n",
+    "            print('Epoch: [{}/{}], Step: [{}/{}], Validation Acc: {}'.format(\n",
+    "                       epoch+1, num_epochs, i+1, len(train_loader), val_acc))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Hyperparameter Search\n",
+    "\n",
+    "The hyperparameters included in the hyperparameter search space are;\n",
+    "\n",
+    "- The size of the hidden dimension of the CNN and RNN,\n",
+    "- Experiment with different ways of interacting the two encoded sentences (concatenation, element-wise multiplication, outer multiplication etc)\n",
+    "- Regularization (e.g. weight decay, dropout)."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.6.6"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
